@@ -18,19 +18,10 @@ jobs:
           Write-Output "===== install-vnc START ====="
           choco install tigervnc -y --no-progress
           Start-Sleep -Seconds 5
-          # 找vncserver
           $vnc = "C:\Program Files\TigerVNC\vncserver.exe"
           if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TigerVNC\vncserver.exe" }
           Write-Output "VNC path: $vnc"
-          # 用vncpasswd生成密码文件
-          $vncpasswd = "C:\Program Files\TigerVNC\vncpasswd.exe"
-          if (-not (Test-Path $vncpasswd)) { $vncpasswd = "C:\Program Files (x86)\TigerVNC\vncpasswd.exe" }
-          # 生成密码文件
-          $passwdDir = "$env:USERPROFILE\.vnc"
-          New-Item -ItemType Directory -Path $passwdDir -Force | Out-Null
-          "newera2625`nnewera2625`n" | & $vncpasswd -f > "$passwdDir\passwd"
-          # 启动vncserver
-          Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes VncAuth -rfbauth `"$passwdDir\passwd`" -AlwaysShared" -WindowStyle Hidden
+          Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes None -AlwaysShared" -WindowStyle Hidden
           Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
           Write-Output "===== install-vnc END ====="
