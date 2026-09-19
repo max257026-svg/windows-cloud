@@ -18,18 +18,23 @@ jobs:
           Write-Output "===== STEP: install-vnc START ====="
           choco install tightvnc -y --no-progress
           $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
-          Start-Process $vnc -ArgumentList "-install"
-          Start-Sleep -Seconds 5
-          Start-Process $vnc -ArgumentList "-start"
-          Start-Sleep -Seconds 10
+          Start-Process $vnc -ArgumentList "-install" -Wait
+          Start-Sleep -Seconds 3
+          # 用echo管道方式设置密码
+          Write-Output "Setting VNC password..."
+          "newera2625`nnewera2625" | & $vnc -setpassword
+          Start-Sleep -Seconds 2
+          # 配置注册表
           $regPath = "HKLM:\SOFTWARE\TightVNC\Server"
-          Set-ItemProperty -Path $regPath -Name "Password" -Value "newera2625" -Type String
           Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
           Set-ItemProperty -Path $regPath -Name "LoopbackOnly" -Value 0 -Type DWord
           Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
-          Restart-Service tvnserver
+          Set-ItemProperty -Path $regPath -Name "DisableTrayIcon" -Value 1 -Type DWord
+          # 启动服务
+          Start-Process $vnc -ArgumentList "-start"
           Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
+          Get-Service tvnserver -ErrorAction SilentlyContinue | Select-Object Status, Name
           Write-Output "===== STEP: install-vnc END ====="
       - name: install-novnc
         shell: powershell
@@ -83,28 +88,22 @@ jobs:
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
           $errLog = "$workDir\cf-err.log"
-          # 启动cloudflared（后台进程，属于本步骤进程树）
           $proc = Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -NoNewWindow
-          # 轮询等待URL
           $url = ""
           for ($i = 0; $i -lt 24; $i++) {
             Start-Sleep -Seconds 5
             foreach ($lf in @($outLog, $errLog)) {
-              if ((Test-Path $lf)) {
-                $size = (Get-Item $lf).Length
-                if ($size -gt 0) {
-                  $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
-                  if ($logText) {
-                    $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
-                    if ($m.Success) { $url = $m.Value; break }
-                  }
+              if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
+                $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
+                if ($logText) {
+                  $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
+                  if ($m.Success) { $url = $m.Value; break }
                 }
               }
             }
             if ($url) { break }
           }
           Write-Output "TUNNEL_URL=$url"
-          # 上报到云电脑平台
           if ($url) {
             $body = @{
               device_id = "$env:DEVICE_ID"
@@ -122,13 +121,7 @@ jobs:
             }
           } else {
             Write-Output "WARNING: TUNNEL_URL not found!"
-            # 输出日志用于调试
-            Write-Output "=== cf-out.log ==="
-            if (Test-Path $outLog) { Get-Content $outLog -ErrorAction SilentlyContinue }
-            Write-Output "=== cf-err.log ==="
-            if (Test-Path $errLog) { Get-Content $errLog -ErrorAction SilentlyContinue }
           }
-          # 保持存活（cloudflared进程在本步骤进程树中，步骤不结束就不会被杀）
-          Write-Output "===== KEEP ALIVE START ====="
-          Start-Sleep -Seconds 19800
+          Write-Output "===== KEEP ALIVE START (5 hours) ====="
+          Start-Sleep -Seconds 18000
           Write-Output "===== STEP: tunnel-report-keepalive END ====="
