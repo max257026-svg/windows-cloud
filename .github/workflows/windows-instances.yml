@@ -16,9 +16,7 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== install-vnc START ====="
-          # 下载TigerVNC MSI
-          Invoke-WebRequest "https://github.com/TigerVNC/tigervnc/releases/download/v1.14.1/tigervnc-1.14.1.x86_x64.msi" -OutFile "$env:TEMP\tvnc.msi"
-          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvnc.msi`" /quiet /norestart ADDLOCAL=Server" -Wait
+          choco install tigervnc -y --no-progress
           Start-Sleep -Seconds 5
           # 找vncserver
           $vnc = "C:\Program Files\TigerVNC\vncserver.exe"
@@ -28,11 +26,11 @@ jobs:
           $vncpasswd = "C:\Program Files\TigerVNC\vncpasswd.exe"
           if (-not (Test-Path $vncpasswd)) { $vncpasswd = "C:\Program Files (x86)\TigerVNC\vncpasswd.exe" }
           # 生成密码文件
-          $passwdFile = "$env:USERPROFILE\.vnc"
-          New-Item -ItemType Directory -Path $passwdFile -Force | Out-Null
-          "newera2625`nnewera2625`n" | & $vncpasswd -f > "$passwdFile\passwd"
-          # 启动vncserver，无加密，VNC密码认证，允许loopback
-          Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes VncAuth -rfbauth `"$passwdFile\passwd`" -AlwaysShared" -WindowStyle Hidden
+          $passwdDir = "$env:USERPROFILE\.vnc"
+          New-Item -ItemType Directory -Path $passwdDir -Force | Out-Null
+          "newera2625`nnewera2625`n" | & $vncpasswd -f > "$passwdDir\passwd"
+          # 启动vncserver
+          Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes VncAuth -rfbauth `"$passwdDir\passwd`" -AlwaysShared" -WindowStyle Hidden
           Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
           Write-Output "===== install-vnc END ====="
