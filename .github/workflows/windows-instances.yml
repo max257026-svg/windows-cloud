@@ -80,31 +80,26 @@ jobs:
         run: |
           Write-Output "===== STEP: start-tunnel START ====="
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
-          $cfPath = (Resolve-Path cloudflared.exe).Path
           $workDir = (Get-Location).Path
-          # 前台运行cloudflared 15秒获取URL，然后nssm后台运行
-          $proc = Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput "$workDir\cf-out.log" -RedirectStandardError "$workDir\cf-err.log" -PassThru -NoNewWindow
-          Start-Sleep -Seconds 20
-          # 从日志找URL
+          # 直接后台启动cloudflared，输出重定向到文件
+          $outFile = "$workDir\cf-out.log"
+          $errFile = "$workDir\cf-err.log"
+          $proc = Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
+          # 等待并轮询URL
           $url = ""
-          foreach ($lf in @("$workDir\cf-out.log", "$workDir\cf-err.log")) {
-            if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
-              $logText = Get-Content $lf -Raw
-              if ($logText) {
-                $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
-                if ($m.Success) { $url = $m.Value; break }
+          for ($i = 0; $i -lt 15; $i++) {
+            Start-Sleep -Seconds 5
+            foreach ($lf in @($outFile, $errFile)) {
+              if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
+                $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
+                if ($logText) {
+                  $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
+                  if ($m.Success) { $url = $m.Value; break }
+                }
               }
             }
+            if ($url) { break }
           }
-          # 杀掉前台进程，改用nssm后台
-          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 2
-          nssm install cloudflared $cfPath
-          nssm set cloudflared AppParameters "tunnel --url http://localhost:6080 --no-autoupdate"
-          nssm set cloudflared AppDirectory $workDir
-          nssm set cloudflared Start SERVICE_AUTO_START
-          nssm start cloudflared
-          Start-Sleep -Seconds 5
           echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
           Write-Output "TUNNEL_URL=$url"
           Write-Output "===== STEP: start-tunnel END ====="
