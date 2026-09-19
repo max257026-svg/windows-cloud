@@ -17,7 +17,7 @@ jobs:
         run: |
           Write-Output "===== install-vnc START ====="
           Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
-          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 SET_RUNTIME_USERNAME= SET_RUNTIME_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
+          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart DISABLE_DESKTOP_SWITCHING=1" -Wait
           Start-Sleep -Seconds 5
           Stop-Service tvnserver -ErrorAction SilentlyContinue
           Set-Service tvnserver -StartupType Disabled -ErrorAction SilentlyContinue
@@ -25,7 +25,8 @@ jobs:
             New-Item -Path $hive -Force | Out-Null
             Set-ItemProperty -Path $hive -Name "AllowLoopback" -Value 1 -Type DWord
             Set-ItemProperty -Path $hive -Name "LoopbackOnly" -Value 0 -Type DWord
-            Set-ItemProperty -Path $hive -Name "AuthType" -Value 2 -Type DWord
+            Set-ItemProperty -Path $hive -Name "AuthType" -Value 1 -Type DWord
+            Set-ItemProperty -Path $hive -Name "DisableTrayIcon" -Value 1 -Type DWord
           }
           $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
           if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TightVNC\tvnserver.exe" }
