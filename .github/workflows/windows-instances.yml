@@ -62,14 +62,16 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== STEP: register-device START ====="
-          # 下载install.ps1并用UTF-8编码执行（避免中文乱码）
           Invoke-WebRequest -Uri "http://status.newera2625.top/download/install.ps1" -OutFile "install.ps1"
           $content = [System.IO.File]::ReadAllText("install.ps1", [System.Text.Encoding]::UTF8)
-          $output = Invoke-Expression $content
-          $output
-          $deviceId = [regex]::Match($output, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}').Value
-          if (-not $deviceId) {
-            $deviceId = [regex]::Match($output, 'dev_[A-Za-z0-9_-]+').Value
+          Invoke-Expression $content
+          Start-Sleep -Seconds 3
+          # 从配置文件读取device_id
+          $deviceId = ""
+          $configFile = "C:\ProgramData\server-status\config.json"
+          if (Test-Path $configFile) {
+            $config = Get-Content $configFile -Raw | ConvertFrom-Json
+            $deviceId = $config.device_id
           }
           Write-Output "DEVICE_ID=$deviceId"
           echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
@@ -90,15 +92,14 @@ jobs:
           nssm start cloudflared
           Start-Sleep -Seconds 50
           $url = ""
-          try {
-            $logFile = "$workDir\cloudflared-out.log"
-            if (Test-Path $logFile) {
-              $log = Get-Content $logFile -Raw
-              $url = [regex]::Match($log, 'https://[a-z0-9-]+\.trycloudflare\.com').Value
+          $logOut = "$workDir\cloudflared-out.log"
+          $logErr = "$workDir\cloudflared-err.log"
+          foreach ($lf in @($logOut, $logErr)) {
+            if (Test-Path $lf) {
+              $log = Get-Content $lf -Raw
+              $m = [regex]::Match($log, 'https://[a-z0-9-]+\.trycloudflare\.com')
+              if ($m.Success) { $url = $m.Value; break }
             }
-          } catch {}
-          if (-not $url) {
-            $url = [regex]::Match((Get-Content "$workDir\cloudflared-err.log" -Raw -ErrorAction SilentlyContinue), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
           }
           echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
           Write-Output "TUNNEL_URL=$url"
