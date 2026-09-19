@@ -17,7 +17,7 @@ jobs:
         run: |
           Write-Output "===== install-vnc START ====="
           Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
-          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart DISABLE_DESKTOP_SWITCHING=1" -Wait
+          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 SET_RUNTIME_USERNAME= SET_RUNTIME_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
           Start-Sleep -Seconds 5
           Stop-Service tvnserver -ErrorAction SilentlyContinue
           Set-Service tvnserver -StartupType Disabled -ErrorAction SilentlyContinue
