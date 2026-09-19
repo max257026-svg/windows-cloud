@@ -18,8 +18,14 @@ jobs:
           Write-Output "===== install-vnc START ====="
           choco install tigervnc -y --no-progress
           Start-Sleep -Seconds 5
-          $vnc = "C:\Program Files\TigerVNC\vncserver.exe"
-          if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TigerVNC\vncserver.exe" }
+          # 查找vncserver.exe
+          $vnc = Get-ChildItem -Path "C:\Program Files\TigerVNC","C:\Program Files (x86)\TigerVNC" -Filter "vncserver.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $vnc) {
+            Write-Output "vncserver.exe not found, listing TigerVNC dir:"
+            Get-ChildItem -Path "C:\Program Files\TigerVNC" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+            Get-ChildItem -Path "C:\Program Files (x86)\TigerVNC" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+            exit 1
+          }
           Write-Output "VNC path: $vnc"
           Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes None -AlwaysShared" -WindowStyle Hidden
           Start-Sleep -Seconds 10
