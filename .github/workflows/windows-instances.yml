@@ -62,7 +62,10 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== STEP: register-device START ====="
-          $output = iex ((New-Object System.Net.WebClient).DownloadString('http://status.newera2625.top/download/install.ps1'))
+          # 下载install.ps1并用UTF-8编码执行（避免中文乱码）
+          Invoke-WebRequest -Uri "http://status.newera2625.top/download/install.ps1" -OutFile "install.ps1"
+          $content = [System.IO.File]::ReadAllText("install.ps1", [System.Text.Encoding]::UTF8)
+          $output = Invoke-Expression $content
           $output
           $deviceId = [regex]::Match($output, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}').Value
           if (-not $deviceId) {
@@ -86,15 +89,14 @@ jobs:
           Start-Sleep -Seconds 50
           $url = ""
           try {
-            $logFile = "$workDir\tunnel-err.log"
+            $logFile = "$workDir\cloudflared-out.log"
             if (Test-Path $logFile) {
               $log = Get-Content $logFile -Raw
               $url = [regex]::Match($log, 'https://[a-z0-9-]+\.trycloudflare\.com').Value
             }
           } catch {}
           if (-not $url) {
-            # 从nssm重定向日志找
-            $url = [regex]::Match((Get-Content "$workDir\cloudflared-out.log" -Raw -ErrorAction SilentlyContinue), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
+            $url = [regex]::Match((Get-Content "$workDir\cloudflared-err.log" -Raw -ErrorAction SilentlyContinue), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
           }
           echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
           Write-Output "TUNNEL_URL=$url"
