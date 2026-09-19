@@ -30,7 +30,8 @@ jobs:
           $encryptor = $des.CreateEncryptor()
           $pwdBytes = [System.Text.Encoding]::ASCII.GetBytes("newera2625")
           $padLen = 8 - ($pwdBytes.Length % 8)
-          if ($padLen -ne 8) { $pwdBytes = $pwdBytes + New-Object byte[] $padLen }
+          $padBytes = New-Object byte[] $padLen
+          if ($padLen -ne 8) { $pwdBytes = $pwdBytes + $padBytes }
           $encrypted = $encryptor.TransformFinalBlock($pwdBytes, 0, $pwdBytes.Length)
           Set-ItemProperty -Path $regPath -Name "Password" -Value $encrypted -Type Binary
           Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
