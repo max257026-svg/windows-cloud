@@ -16,30 +16,23 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== install-vnc START ====="
-          Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
-          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 SET_RUNTIME_USERNAME= SET_RUNTIME_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
+          # 下载TigerVNC MSI
+          Invoke-WebRequest "https://github.com/TigerVNC/tigervnc/releases/download/v1.14.1/tigervnc-1.14.1.x86_x64.msi" -OutFile "$env:TEMP\tvnc.msi"
+          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvnc.msi`" /quiet /norestart ADDLOCAL=Server" -Wait
           Start-Sleep -Seconds 5
-          Stop-Service tvnserver -ErrorAction SilentlyContinue
-          Set-Service tvnserver -StartupType Disabled -ErrorAction SilentlyContinue
-          foreach ($hive in @("HKLM:\SOFTWARE\TightVNC\Server", "HKCU:\SOFTWARE\TightVNC\Server")) {
-            New-Item -Path $hive -Force | Out-Null
-            Set-ItemProperty -Path $hive -Name "AllowLoopback" -Value 1 -Type DWord
-            Set-ItemProperty -Path $hive -Name "LoopbackOnly" -Value 0 -Type DWord
-            Set-ItemProperty -Path $hive -Name "AuthType" -Value 2 -Type DWord
-            Set-ItemProperty -Path $hive -Name "DisableTrayIcon" -Value 1 -Type DWord
-          }
-          # 从HKLM复制MSI设置的加密密码到HKCU
-          $hkmlPwd = (Get-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "Password" -ErrorAction SilentlyContinue).Password
-          if ($hkmlPwd) {
-            Set-ItemProperty -Path "HKCU:\SOFTWARE\TightVNC\Server" -Name "Password" -Value $hkmlPwd -Type Binary
-            Write-Output "Password copied from HKLM to HKCU"
-          } else {
-            Write-Output "WARNING: No password in HKLM"
-          }
-          $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
-          if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TightVNC\tvnserver.exe" }
+          # 找vncserver
+          $vnc = "C:\Program Files\TigerVNC\vncserver.exe"
+          if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TigerVNC\vncserver.exe" }
           Write-Output "VNC path: $vnc"
-          Start-Process $vnc -ArgumentList "-run" -WindowStyle Hidden
+          # 用vncpasswd生成密码文件
+          $vncpasswd = "C:\Program Files\TigerVNC\vncpasswd.exe"
+          if (-not (Test-Path $vncpasswd)) { $vncpasswd = "C:\Program Files (x86)\TigerVNC\vncpasswd.exe" }
+          # 生成密码文件
+          $passwdFile = "$env:USERPROFILE\.vnc"
+          New-Item -ItemType Directory -Path $passwdFile -Force | Out-Null
+          "newera2625`nnewera2625`n" | & $vncpasswd -f > "$passwdFile\passwd"
+          # 启动vncserver，无加密，VNC密码认证，允许loopback
+          Start-Process $vnc -ArgumentList "-rfbport 5900 -SecurityTypes VncAuth -rfbauth `"$passwdFile\passwd`" -AlwaysShared" -WindowStyle Hidden
           Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
           Write-Output "===== install-vnc END ====="
