@@ -16,21 +16,22 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== install-vnc START ====="
-          # 下载并静默安装TightVNC
           Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
           Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 SET_RUNTIME_USERNAME= SET_RUNTIME_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
           Start-Sleep -Seconds 5
-          # 找tvnserver路径
+          Stop-Service tvnserver -ErrorAction SilentlyContinue
+          Set-Service tvnserver -StartupType Disabled -ErrorAction SilentlyContinue
+          foreach ($hive in @("HKLM:\SOFTWARE\TightVNC\Server", "HKCU:\SOFTWARE\TightVNC\Server")) {
+            New-Item -Path $hive -Force | Out-Null
+            Set-ItemProperty -Path $hive -Name "AllowLoopback" -Value 1 -Type DWord
+            Set-ItemProperty -Path $hive -Name "LoopbackOnly" -Value 0 -Type DWord
+            Set-ItemProperty -Path $hive -Name "AuthType" -Value 2 -Type DWord
+          }
           $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
           if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TightVNC\tvnserver.exe" }
           Write-Output "VNC path: $vnc"
-          # -run模式读取HKCU注册表，设置loopback
-          $regPath = "HKCU:\SOFTWARE\TightVNC\Server"
-          New-Item -Path $regPath -Force | Out-Null
-          Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
-          Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
           Start-Process $vnc -ArgumentList "-run" -WindowStyle Hidden
-          Start-Sleep -Seconds 8
+          Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
           Write-Output "===== install-vnc END ====="
       - name: install-novnc
@@ -38,8 +39,6 @@ jobs:
         run: |
           Write-Output "===== install-novnc START ====="
           choco install python -y --no-progress
-          choco install nssm -y --no-progress
-          python -m pip install --upgrade pip
           python -m pip install websockify
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "novnc.zip"
           Expand-Archive -Path "novnc.zip" -DestinationPath "."
@@ -52,7 +51,6 @@ jobs:
           $pythonPath = (Get-Command python).Source
           $novncPath = (Resolve-Path novnc).Path
           $workDir = (Get-Location).Path
-          # 直接用websockify连接VNC，同时代理noVNC静态文件
           Start-Process -FilePath $pythonPath -ArgumentList "-m websockify --web=$novncPath 6080 localhost:5900" -WorkingDirectory $workDir -WindowStyle Hidden
           Start-Sleep -Seconds 8
           netstat -ano | findstr "6080"
