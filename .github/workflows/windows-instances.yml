@@ -15,38 +15,26 @@ jobs:
       - name: install-vnc
         shell: powershell
         run: |
-          Write-Output "===== STEP: install-vnc START ====="
-          choco install tightvnc -y --no-progress
-          $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
-          Start-Process $vnc -ArgumentList "-install" -Wait
-          Start-Sleep -Seconds 3
+          Write-Output "===== install-vnc START ====="
+          # 下载TightVNC MSI并静默安装（带密码）
+          Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
+          $p = Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 SERVER_PORT=5900 DISABLE_DESKTOP_SWITCHING=1 DISABLETILE=1" -Wait -PassThru
+          Write-Output "MSI exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 5
+          # 配置允许loopback
           $regPath = "HKLM:\SOFTWARE\TightVNC\Server"
-          # DES加密密码写入注册表
-          $key = [byte[]](0x17, 0x52, 0x6B, 0x3C, 0x6F, 0xE6, 0x7E, 0x7D)
-          $des = [System.Security.Cryptography.DES]::Create()
-          $des.Key = $key
-          $des.Mode = [System.Security.Cryptography.CipherMode]::ECB
-          $des.Padding = [System.Security.Cryptography.PaddingMode]::Zero
-          $encryptor = $des.CreateEncryptor()
-          $pwdBytes = [System.Text.Encoding]::ASCII.GetBytes("newera2625")
-          $padLen = 8 - ($pwdBytes.Length % 8)
-          $padBytes = New-Object byte[] $padLen
-          if ($padLen -ne 8) { $pwdBytes = $pwdBytes + $padBytes }
-          $encrypted = $encryptor.TransformFinalBlock($pwdBytes, 0, $pwdBytes.Length)
-          Set-ItemProperty -Path $regPath -Name "Password" -Value $encrypted -Type Binary
           Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
           Set-ItemProperty -Path $regPath -Name "LoopbackOnly" -Value 0 -Type DWord
           Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
           Set-ItemProperty -Path $regPath -Name "DisableTrayIcon" -Value 1 -Type DWord
-          Start-Process $vnc -ArgumentList "-start"
-          Start-Sleep -Seconds 10
+          Restart-Service tvnserver -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
           netstat -ano | findstr "5900"
-          Get-Service tvnserver -ErrorAction SilentlyContinue | Select-Object Status, Name
-          Write-Output "===== STEP: install-vnc END ====="
+          Write-Output "===== install-vnc END ====="
       - name: install-novnc
         shell: powershell
         run: |
-          Write-Output "===== STEP: install-novnc START ====="
+          Write-Output "===== install-novnc START ====="
           choco install python -y --no-progress
           choco install nssm -y --no-progress
           python -m pip install --upgrade pip
@@ -54,11 +42,11 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "novnc.zip"
           Expand-Archive -Path "novnc.zip" -DestinationPath "."
           Rename-Item -Path "noVNC-master" -NewName "novnc"
-          Write-Output "===== STEP: install-novnc END ====="
+          Write-Output "===== install-novnc END ====="
       - name: start-novnc
         shell: powershell
         run: |
-          Write-Output "===== STEP: start-novnc START ====="
+          Write-Output "===== start-novnc START ====="
           $pythonPath = (Get-Command python).Source
           $novncPath = (Resolve-Path novnc).Path
           $workDir = (Get-Location).Path
@@ -69,11 +57,11 @@ jobs:
           nssm start websockify
           Start-Sleep -Seconds 10
           netstat -ano | findstr "6080"
-          Write-Output "===== STEP: start-novnc END ====="
+          Write-Output "===== start-novnc END ====="
       - name: register-device
         shell: powershell
         run: |
-          Write-Output "===== STEP: register-device START ====="
+          Write-Output "===== register-device START ====="
           Invoke-WebRequest -Uri "http://status.newera2625.top/download/install.ps1" -OutFile "install.ps1"
           $content = [System.IO.File]::ReadAllText("install.ps1", [System.Text.Encoding]::UTF8)
           Invoke-Expression $content
@@ -86,11 +74,11 @@ jobs:
           }
           Write-Output "DEVICE_ID=$deviceId"
           echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
-          Write-Output "===== STEP: register-device END ====="
+          Write-Output "===== register-device END ====="
       - name: tunnel-report-keepalive
         shell: powershell
         run: |
-          Write-Output "===== STEP: tunnel-report-keepalive START ====="
+          Write-Output "===== tunnel-report-keepalive START ====="
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
@@ -123,10 +111,7 @@ jobs:
             try {
               $resp = Invoke-RestMethod -Uri "https://cloud.newera2625.top/api/report" -Method Post -Body $body -ContentType "application/json"
               Write-Output "report response: $resp"
-            } catch {
-              Write-Output "report failed: $_"
-            }
+            } catch { Write-Output "report failed: $_" }
           }
-          Write-Output "===== KEEP ALIVE START (5 hours) ====="
+          Write-Output "===== KEEP ALIVE 5h ====="
           Start-Sleep -Seconds 18000
-          Write-Output "===== STEP: tunnel-report-keepalive END ====="
