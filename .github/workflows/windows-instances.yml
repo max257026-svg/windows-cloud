@@ -84,6 +84,8 @@ jobs:
           nssm install cloudflared $cfPath
           nssm set cloudflared AppParameters "tunnel --url http://localhost:6080 --no-autoupdate"
           nssm set cloudflared AppDirectory $workDir
+          nssm set cloudflared AppStdout "$workDir\cloudflared-out.log"
+          nssm set cloudflared AppStderr "$workDir\cloudflared-err.log"
           nssm set cloudflared Start SERVICE_AUTO_START
           nssm start cloudflared
           Start-Sleep -Seconds 50
