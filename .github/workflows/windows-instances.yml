@@ -20,17 +20,23 @@ jobs:
           $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
           Start-Process $vnc -ArgumentList "-install" -Wait
           Start-Sleep -Seconds 3
-          # 用echo管道方式设置密码
-          Write-Output "Setting VNC password..."
-          "newera2625`nnewera2625" | & $vnc -setpassword
-          Start-Sleep -Seconds 2
-          # 配置注册表
           $regPath = "HKLM:\SOFTWARE\TightVNC\Server"
+          # DES加密密码写入注册表
+          $key = [byte[]](0x17, 0x52, 0x6B, 0x3C, 0x6F, 0xE6, 0x7E, 0x7D)
+          $des = [System.Security.Cryptography.DES]::Create()
+          $des.Key = $key
+          $des.Mode = [System.Security.Cryptography.CipherMode]::ECB
+          $des.Padding = [System.Security.Cryptography.PaddingMode]::Zero
+          $encryptor = $des.CreateEncryptor()
+          $pwdBytes = [System.Text.Encoding]::ASCII.GetBytes("newera2625")
+          $padLen = 8 - ($pwdBytes.Length % 8)
+          if ($padLen -ne 8) { $pwdBytes = $pwdBytes + [byte[]]::new($padLen) }
+          $encrypted = $encryptor.TransformFinalBlock($pwdBytes, 0, $pwdBytes.Length)
+          Set-ItemProperty -Path $regPath -Name "Password" -Value $encrypted -Type Binary
           Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
           Set-ItemProperty -Path $regPath -Name "LoopbackOnly" -Value 0 -Type DWord
           Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
           Set-ItemProperty -Path $regPath -Name "DisableTrayIcon" -Value 1 -Type DWord
-          # 启动服务
           Start-Process $vnc -ArgumentList "-start"
           Start-Sleep -Seconds 10
           netstat -ano | findstr "5900"
@@ -119,8 +125,6 @@ jobs:
             } catch {
               Write-Output "report failed: $_"
             }
-          } else {
-            Write-Output "WARNING: TUNNEL_URL not found!"
           }
           Write-Output "===== KEEP ALIVE START (5 hours) ====="
           Start-Sleep -Seconds 18000
