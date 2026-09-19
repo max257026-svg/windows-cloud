@@ -80,26 +80,41 @@ jobs:
         run: |
           Write-Output "===== STEP: start-tunnel START ====="
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          $cfPath = (Resolve-Path cloudflared.exe).Path
           $workDir = (Get-Location).Path
-          # 直接后台启动cloudflared，输出重定向到文件
-          $outFile = "$workDir\cf-out.log"
-          $errFile = "$workDir\cf-err.log"
-          $proc = Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outFile -RedirectStandardError $errFile -PassThru -WindowStyle Hidden
-          # 等待并轮询URL
+          $outLog = "$workDir\cf-out.log"
+          $errLog = "$workDir\cf-err.log"
+          # nssm安装并启动cloudflared服务
+          nssm install cloudflared $cfPath
+          nssm set cloudflared AppParameters "tunnel --url http://localhost:6080 --no-autoupdate"
+          nssm set cloudflared AppDirectory $workDir
+          nssm set cloudflared AppStdout $outLog
+          nssm set cloudflared AppStderr $errLog
+          nssm set cloudflared Start SERVICE_AUTO_START
+          nssm start cloudflared
+          Write-Output "等待cloudflared建立隧道..."
           $url = ""
-          for ($i = 0; $i -lt 15; $i++) {
+          for ($i = 0; $i -lt 18; $i++) {
             Start-Sleep -Seconds 5
-            foreach ($lf in @($outFile, $errFile)) {
-              if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
-                $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
-                if ($logText) {
-                  $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
-                  if ($m.Success) { $url = $m.Value; break }
+            foreach ($lf in @($outLog, $errLog)) {
+              if ((Test-Path $lf)) {
+                $size = (Get-Item $lf).Length
+                if ($size -gt 0) {
+                  $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
+                  if ($logText) {
+                    $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
+                    if ($m.Success) { $url = $m.Value; break }
+                  }
                 }
               }
             }
             if ($url) { break }
           }
+          # 调试：输出日志内容
+          Write-Output "=== cf-out.log ==="
+          if (Test-Path $outLog) { Get-Content $outLog -ErrorAction SilentlyContinue | Select-Object -Last 10 }
+          Write-Output "=== cf-err.log ==="
+          if (Test-Path $errLog) { Get-Content $errLog -ErrorAction SilentlyContinue | Select-Object -Last 10 }
           echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
           Write-Output "TUNNEL_URL=$url"
           Write-Output "===== STEP: start-tunnel END ====="
