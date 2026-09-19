@@ -18,26 +18,11 @@ jobs:
           Write-Output "===== install-vnc START ====="
           Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
           Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
-          Start-Sleep -Seconds 5
-          choco install psexec -y --no-progress
-          $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
-          if (-not (Test-Path $vnc)) { $vnc = "C:\Program Files (x86)\TightVNC\tvnserver.exe" }
-          Write-Output "VNC path: $vnc"
-          # 查当前会话ID
-          $sessionId = (query session | Select-String "runneradmin" | ForEach-Object { ($_ -split '\s+')[2] })
-          if (-not $sessionId) { $sessionId = "1" }
-          Write-Output "Session ID: $sessionId"
-          # 设置HKCU
-          $regPath = "HKCU:\SOFTWARE\TightVNC\Server"
-          New-Item -Path $regPath -Force | Out-Null
-          Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
-          Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
-          # 从HKLM复制密码
-          $hkmlPwd = (Get-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "Password" -ErrorAction SilentlyContinue).Password
-          if ($hkmlPwd) { Set-ItemProperty -Path $regPath -Name "Password" -Value $hkmlPwd -Type Binary }
-          # 用psexec在交互会话中启动
-          psexec -accepteula -i $sessionId -s $vnc -run
           Start-Sleep -Seconds 10
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "AllowLoopback" -Value 1 -Type DWord
+          Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "LoopbackOnly" -Value 0 -Type DWord
+          Restart-Service tvnserver -Force
+          Start-Sleep -Seconds 5
           netstat -ano | findstr "5900"
           Write-Output "===== install-vnc END ====="
       - name: install-novnc
