@@ -66,7 +66,6 @@ jobs:
           $content = [System.IO.File]::ReadAllText("install.ps1", [System.Text.Encoding]::UTF8)
           Invoke-Expression $content
           Start-Sleep -Seconds 3
-          # 从配置文件读取device_id
           $deviceId = ""
           $configFile = "C:\ProgramData\server-status\config.json"
           if (Test-Path $configFile) {
@@ -83,24 +82,29 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $cfPath = (Resolve-Path cloudflared.exe).Path
           $workDir = (Get-Location).Path
+          # 前台运行cloudflared 15秒获取URL，然后nssm后台运行
+          $proc = Start-Process -FilePath $cfPath -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput "$workDir\cf-out.log" -RedirectStandardError "$workDir\cf-err.log" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 20
+          # 从日志找URL
+          $url = ""
+          foreach ($lf in @("$workDir\cf-out.log", "$workDir\cf-err.log")) {
+            if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
+              $logText = Get-Content $lf -Raw
+              if ($logText) {
+                $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
+                if ($m.Success) { $url = $m.Value; break }
+              }
+            }
+          }
+          # 杀掉前台进程，改用nssm后台
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 2
           nssm install cloudflared $cfPath
           nssm set cloudflared AppParameters "tunnel --url http://localhost:6080 --no-autoupdate"
           nssm set cloudflared AppDirectory $workDir
-          nssm set cloudflared AppStdout "$workDir\cloudflared-out.log"
-          nssm set cloudflared AppStderr "$workDir\cloudflared-err.log"
           nssm set cloudflared Start SERVICE_AUTO_START
           nssm start cloudflared
-          Start-Sleep -Seconds 50
-          $url = ""
-          $logOut = "$workDir\cloudflared-out.log"
-          $logErr = "$workDir\cloudflared-err.log"
-          foreach ($lf in @($logOut, $logErr)) {
-            if (Test-Path $lf) {
-              $log = Get-Content $lf -Raw
-              $m = [regex]::Match($log, 'https://[a-z0-9-]+\.trycloudflare\.com')
-              if ($m.Success) { $url = $m.Value; break }
-            }
-          }
+          Start-Sleep -Seconds 5
           echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
           Write-Output "TUNNEL_URL=$url"
           Write-Output "===== STEP: start-tunnel END ====="
