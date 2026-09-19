@@ -25,7 +25,7 @@ jobs:
             New-Item -Path $hive -Force | Out-Null
             Set-ItemProperty -Path $hive -Name "AllowLoopback" -Value 1 -Type DWord
             Set-ItemProperty -Path $hive -Name "LoopbackOnly" -Value 0 -Type DWord
-            Set-ItemProperty -Path $hive -Name "AuthType" -Value 1 -Type DWord
+            Set-ItemProperty -Path $hive -Name "AuthType" -Value 0 -Type DWord
             Set-ItemProperty -Path $hive -Name "DisableTrayIcon" -Value 1 -Type DWord
           }
           $vnc = "C:\Program Files\TightVNC\tvnserver.exe"
