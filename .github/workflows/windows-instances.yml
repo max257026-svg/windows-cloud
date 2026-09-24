@@ -12,40 +12,46 @@ jobs:
       matrix:
         instance: [1,2,3,4,5,6,7,8,9,10]
     steps:
-      - name: install-vnc
+      - name: enable-rdp
         shell: powershell
         run: |
-          Write-Output "===== install-vnc START ====="
-          Invoke-WebRequest "https://www.tightvnc.com/download/2.8.59/tightvnc-2.8.59-gpl-setup-64bit.msi" -OutFile "$env:TEMP\tvn.msi"
-          Start-Process msiexec -ArgumentList "/i `"$env:TEMP\tvn.msi`" /quiet /norestart SERVER_PASSWORD=newera2625 DISABLE_DESKTOP_SWITCHING=1" -Wait
-          Start-Sleep -Seconds 10
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "AllowLoopback" -Value 1 -Type DWord
-          Set-ItemProperty -Path "HKLM:\SOFTWARE\TightVNC\Server" -Name "LoopbackOnly" -Value 0 -Type DWord
-          Restart-Service tvnserver -Force
-          Start-Sleep -Seconds 5
-          netstat -ano | findstr "5900"
-          Write-Output "===== install-vnc END ====="
-      - name: install-novnc
+          Write-Output "===== enable-rdp START ====="
+          # 开启Windows远程桌面
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Type DWord
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0 -Type DWord
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'SecurityLayer' -Value 0 -Type DWord
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'fAllowRemoteConnections' -Value 1 -Type DWord
+          # 防火墙放行RDP
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+          Set-NetFirewallRule -DisplayGroup 'Remote Desktop' -Enabled True -ErrorAction SilentlyContinue
+          # 给runneradmin设置密码并加入远程桌面组
+          net user runneradmin newera2625
+          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member 'runneradmin' -ErrorAction SilentlyContinue
+          # 本地管理员组确认
+          Add-LocalGroupMember -Group 'Administrators' -Member 'runneradmin' -ErrorAction SilentlyContinue
+          # 验证3389端口
+          Start-Sleep -Seconds 3
+          netstat -ano | findstr "3389"
+          Write-Output "===== enable-rdp END ====="
+      - name: install-proxy
         shell: powershell
         run: |
-          Write-Output "===== install-novnc START ====="
+          Write-Output "===== install-proxy START ====="
+          # 安装python和websockify
           choco install python -y --no-progress
           python -m pip install websockify
-          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "novnc.zip"
-          Expand-Archive -Path "novnc.zip" -DestinationPath "."
-          Rename-Item -Path "noVNC-master" -NewName "novnc"
-          Write-Output "===== install-novnc END ====="
-      - name: start-novnc
+          Write-Output "===== install-proxy END ====="
+      - name: start-proxy
         shell: powershell
         run: |
-          Write-Output "===== start-novnc START ====="
+          Write-Output "===== start-proxy START ====="
           $pythonPath = (Get-Command python).Source
-          $novncPath = (Resolve-Path novnc).Path
           $workDir = (Get-Location).Path
-          Start-Process -FilePath $pythonPath -ArgumentList "-m websockify --web=$novncPath 6080 localhost:5900" -WorkingDirectory $workDir -WindowStyle Hidden
+          # websockify代理RDP 3389端口到6080
+          Start-Process -FilePath $pythonPath -ArgumentList "-m websockify 6080 localhost:3389" -WorkingDirectory $workDir -WindowStyle Hidden
           Start-Sleep -Seconds 8
           netstat -ano | findstr "6080"
-          Write-Output "===== start-novnc END ====="
+          Write-Output "===== start-proxy END ====="
       - name: register-device
         shell: powershell
         run: |
