@@ -27,7 +27,6 @@ jobs:
           # 给runneradmin设置密码并加入远程桌面组
           net user runneradmin newera2625
           Add-LocalGroupMember -Group 'Remote Desktop Users' -Member 'runneradmin' -ErrorAction SilentlyContinue
-          # 本地管理员组确认
           Add-LocalGroupMember -Group 'Administrators' -Member 'runneradmin' -ErrorAction SilentlyContinue
           # 验证3389端口
           Start-Sleep -Seconds 3
@@ -37,42 +36,61 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== install-proxy START ====="
-          # 安装python和websockify
           choco install python -y --no-progress
           python -m pip install websockify
           Write-Output "===== install-proxy END ====="
+      - name: register-device
+        shell: powershell
+        run: |
+          Write-Output "===== register-device START ====="
+          $dir = "C:\Program Files\server-status-client"
+          $cfgDir = "C:\ProgramData\server-status"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+          # 下载客户端
+          Invoke-WebRequest -Uri "http://status.newera2625.top/download/client.ps1" -OutFile "$dir\client.ps1"
+          # 生成设备ID和配置
+          $deviceId = [guid]::NewGuid().ToString()
+          $config = @{
+            report_url = "http://status.newera2625.top/api/report"
+            device_id = $deviceId
+            is_main = $false
+          }
+          $config | ConvertTo-Json | Out-File -FilePath "$cfgDir\config.json" -Encoding utf8
+          Write-Output "DEVICE_ID=$deviceId"
+          echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
+          # 首次上报（关键诊断）
+          Write-Output "----- 首次上报 -----"
+          powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
+          Write-Output "----- client.log -----"
+          Get-Content "$cfgDir\client.log" -ErrorAction SilentlyContinue
+          Write-Output "===== register-device END ====="
       - name: start-proxy
         shell: powershell
         run: |
           Write-Output "===== start-proxy START ====="
           $pythonPath = (Get-Command python).Source
           $workDir = (Get-Location).Path
-          # websockify代理RDP 3389端口到6080
           Start-Process -FilePath $pythonPath -ArgumentList "-m websockify 6080 localhost:3389" -WorkingDirectory $workDir -WindowStyle Hidden
           Start-Sleep -Seconds 8
           netstat -ano | findstr "6080"
           Write-Output "===== start-proxy END ====="
-      - name: register-device
-        shell: powershell
-        run: |
-          Write-Output "===== register-device START ====="
-          Invoke-WebRequest -Uri "http://status.newera2625.top/download/install.ps1" -OutFile "install.ps1"
-          $content = [System.IO.File]::ReadAllText("install.ps1", [System.Text.Encoding]::UTF8)
-          Invoke-Expression $content
-          Start-Sleep -Seconds 3
-          $deviceId = ""
-          $configFile = "C:\ProgramData\server-status\config.json"
-          if (Test-Path $configFile) {
-            $config = Get-Content $configFile -Raw | ConvertFrom-Json
-            $deviceId = $config.device_id
-          }
-          Write-Output "DEVICE_ID=$deviceId"
-          echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
-          Write-Output "===== register-device END ====="
       - name: tunnel-report-keepalive
         shell: powershell
         run: |
           Write-Output "===== tunnel-report-keepalive START ====="
+          # 启动状态上报循环（子进程方式，避免client.ps1的exit杀掉循环）
+          $dir = "C:\Program Files\server-status-client"
+          $runContent = @"
+while (`$true) {
+    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\client.ps1`"" -Wait -WindowStyle Hidden
+    Start-Sleep -Seconds 30
+}
+"@
+          $runContent | Out-File -FilePath "$dir\run.ps1" -Encoding utf8
+          Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\run.ps1`"" -WindowStyle Hidden
+          Write-Output "status report loop started"
+          # 下载cloudflared并启动隧道
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
