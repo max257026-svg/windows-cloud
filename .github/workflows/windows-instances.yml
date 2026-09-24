@@ -79,12 +79,7 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== tunnel-report-keepalive START ====="
-          # 启动状态上报循环（子进程方式，避免client.ps1的exit杀掉循环）
           $dir = "C:\Program Files\server-status-client"
-          $runB64 = "d2hpbGUgKCR0cnVlKSB7CiAgICBTdGFydC1Qcm9jZXNzIHBvd2Vyc2hlbGwgLUFyZ3VtZW50TGlzdCAiLUV4ZWN1dGlvblBvbGljeSBCeXBhc3MgLVdpbmRvd1N0eWxlIEhpZGRlbiAtRmlsZSAiQzpcUHJvZ3JhbSBGaWxlc1xzZXJ2ZXItc3RhdHVzLWNsaWVudFxjbGllbnQucHMxIiIgLVdhaXQgLVdpbmRvd1N0eWxlIEhpZGRlbgogICAgU3RhcnQtU2xlZXAgLVNlY29uZHMgMzAKfQo="
-          [System.IO.File]::WriteAllBytes("$dir\run.ps1", [Convert]::FromBase64String($runB64))
-          Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\run.ps1`"" -WindowStyle Hidden
-          Write-Output "status report loop started"
           # 下载cloudflared并启动隧道
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $workDir = (Get-Location).Path
@@ -119,5 +114,11 @@ jobs:
               Write-Output "report response: $resp"
             } catch { Write-Output "report failed: $_" }
           }
-          Write-Output "===== KEEP ALIVE 5h ====="
-          Start-Sleep -Seconds 18000
+          # 状态上报循环（直接在本步骤进程内运行5小时，每30秒上报一次，不依赖后台子进程）
+          Write-Output "===== STATUS REPORT LOOP START ====="
+          $loopDeadline = (Get-Date).AddHours(5)
+          while ((Get-Date) -lt $loopDeadline) {
+            powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "$dir\client.ps1"
+            Start-Sleep -Seconds 30
+          }
+          Write-Output "===== STATUS REPORT LOOP END ====="
