@@ -29,31 +29,23 @@ jobs:
 
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install Chinese Fonts
+      - name: 2. Install Chinese Language Pack
         shell: powershell
         run: |
-          Write-Output "===== install-chinese-fonts START ====="
-          # 安装中文字体（微软雅黑、宋体、黑体、楷体）
-          $fontDir = "C:\Windows\Fonts"
-          $fonts = @(
-            @{Name="msyh.ttc"; Url="https://github.com/StellarCN/scp_zh/raw/master/fonts/msyh.ttc"},
-            @{Name="simsun.ttc"; Url="https://github.com/StellarCN/scp_zh/raw/master/fonts/simsun.ttc"}
-          )
-          foreach ($f in $fonts) {
-            $dest = "$fontDir\$($f.Name)"
-            if (-not (Test-Path $dest)) {
-              try {
-                Invoke-WebRequest -Uri $f.Url -OutFile $dest -UseBasicParsing -TimeoutSec 60
-                Write-Output "Installed: $($f.Name)"
-              } catch {
-                Write-Output "Failed to download $($f.Name): $_"
-              }
-            }
-          }
-          # 设置系统区域为中文
-          Set-WinSystemLocale -SystemLocale "zh-CN" -ErrorAction SilentlyContinue
-          Set-Culture "zh-CN" -ErrorAction SilentlyContinue
-          Write-Output "===== install-chinese-fonts END ====="
+          Write-Output "===== install-chinese-lang START ====="
+          # 安装中文简体语言包
+          Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
+          # 设置系统UI语言为中文
+          Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
+          Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
+          # 设置系统区域和位置
+          Set-WinSystemLocale -SystemLocale "zh-CN"
+          Set-Culture "zh-CN"
+          Set-WinHomeLocation -GeoId 45 -ErrorAction SilentlyContinue
+          # 设置注册表默认UI语言
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'InstallLanguage' -Value '0804' -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'Default' -Value '0804' -ErrorAction SilentlyContinue
+          Write-Output "===== install-chinese-lang END ====="
 
       - name: 3. Install IIS & Prerequisites
         shell: powershell
@@ -147,7 +139,6 @@ jobs:
               Write-Output "report response: $resp"
             } catch { Write-Output "report failed: $_" }
           }
-          # Keep alive
           Write-Output "===== KEEP ALIVE START ====="
           $loopDeadline = (Get-Date).AddHours(5)
           while ((Get-Date) -lt $loopDeadline) {
