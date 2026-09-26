@@ -6,36 +6,39 @@ on:
 jobs:
   windows-instance:
     runs-on: windows-latest
-    timeout-minutes: 350
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
         instance: [1,2,3,4,5,6,7,8,9,10]
     steps:
-      - name: enable-rdp
+      - name: 1. Enable Remote Desktop & Firewall
         shell: powershell
         run: |
           Write-Output "===== enable-rdp START ====="
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0 -Type DWord
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 0 -Type DWord
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'SecurityLayer' -Value 0 -Type DWord
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'fAllowRemoteConnections' -Value 1 -Type DWord
-          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
-          Set-NetFirewallRule -DisplayGroup 'Remote Desktop' -Enabled True -ErrorAction SilentlyContinue
+          # 开启RDP
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "SecurityLayer" -Value 0 -Type DWord
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "fAllowRemoteConnections" -Value 1 -Type DWord
+          # 设置密码并加入管理员组
           net user runneradmin newera2625
-          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member 'runneradmin' -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group 'Administrators' -Member 'runneradmin' -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 3
           netstat -ano | findstr "3389"
           Write-Output "===== enable-rdp END ====="
-      - name: install-proxy
+
+      - name: 2. Install Python & websockify
         shell: powershell
         run: |
           Write-Output "===== install-proxy START ====="
           choco install python -y --no-progress
           python -m pip install websockify
           Write-Output "===== install-proxy END ====="
-      - name: download-novnc
+
+      - name: 3. Download noVNC web
         shell: powershell
         run: |
           Write-Output "===== download-novnc START ====="
@@ -45,10 +48,10 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$workDir\novnc.zip"
           Expand-Archive -Path "$workDir\novnc.zip" -DestinationPath "$workDir" -Force
           Copy-Item -Path "$workDir\noVNC-master\*" -Destination $novncDir -Recurse -Force
-          Write-Output "noVNC downloaded to $novncDir"
-          Get-ChildItem $novncDir -Name
+          Write-Output "noVNC ready at $novncDir"
           Write-Output "===== download-novnc END ====="
-      - name: register-device
+
+      - name: 4. Register device
         shell: powershell
         run: |
           Write-Output "===== register-device START ====="
@@ -67,29 +70,31 @@ jobs:
           Write-Output "DEVICE_ID=$deviceId"
           echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
           powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
-          Get-Content "$cfgDir\client.log" -ErrorAction SilentlyContinue
           Write-Output "===== register-device END ====="
-      - name: start-proxy
+
+      - name: 5. Start websockify with noVNC web
         shell: powershell
         run: |
           Write-Output "===== start-proxy START ====="
           $pythonPath = (Get-Command python).Source
           $workDir = (Get-Location).Path
           $novncDir = "$workDir\novnc"
+          # websockify: 6080 -> RDP 3389, 同时提供noVNC网页
           Start-Process -FilePath $pythonPath -ArgumentList "-m websockify 6080 localhost:3389 --web $novncDir" -WorkingDirectory $workDir -WindowStyle Hidden
           Start-Sleep -Seconds 8
           netstat -ano | findstr "6080"
           Write-Output "===== start-proxy END ====="
-      - name: tunnel-report-keepalive
+
+      - name: 6. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
-          Write-Output "===== tunnel-report-keepalive START ====="
+          Write-Output "===== tunnel START ====="
           $dir = "C:\Program Files\server-status-client"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
           $errLog = "$workDir\cf-err.log"
-          $proc = Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -NoNewWindow
+          Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -NoNewWindow
           $url = ""
           for ($i = 0; $i -lt 24; $i++) {
             Start-Sleep -Seconds 5
@@ -118,10 +123,11 @@ jobs:
               Write-Output "report response: $resp"
             } catch { Write-Output "report failed: $_" }
           }
-          Write-Output "===== STATUS REPORT LOOP START ====="
+          # Keep alive
+          Write-Output "===== KEEP ALIVE START ====="
           $loopDeadline = (Get-Date).AddHours(5)
           while ((Get-Date) -lt $loopDeadline) {
             powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "$dir\client.ps1"
             Start-Sleep -Seconds 30
           }
-          Write-Output "===== STATUS REPORT LOOP END ====="
+          Write-Output "===== KEEP ALIVE END ====="
