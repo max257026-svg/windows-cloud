@@ -1,10 +1,10 @@
-name: Windows Cloud Instances
+name: Windows Web RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows-instance:
+  myrtille-rdp:
     runs-on: windows-latest
     timeout-minutes: 360
     strategy:
@@ -12,46 +12,83 @@ jobs:
       matrix:
         instance: [1,2,3,4,5,6,7,8,9,10]
     steps:
-      - name: 1. Enable Remote Desktop & Firewall
+      - name: 1. Enable RDP & Create User
         shell: powershell
         run: |
           Write-Output "===== enable-rdp START ====="
-          # 开启RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "SecurityLayer" -Value 0 -Type DWord
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "fAllowRemoteConnections" -Value 1 -Type DWord
-          # 设置密码并加入管理员组
-          net user runneradmin newera2625
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "runneradmin" -ErrorAction SilentlyContinue
-          Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 3
-          netstat -ano | findstr "3389"
+
+          net user rdpuser "Newera@2625" /add
+          net localgroup "Remote Desktop Users" rdpuser /add
+          net localgroup "Administrators" rdpuser /add
+          if ($LASTEXITCODE -ne 0) { throw "create user failed" }
+
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install Python & websockify
+      - name: 2. Install Chinese Fonts
         shell: powershell
         run: |
-          Write-Output "===== install-proxy START ====="
-          choco install python -y --no-progress
-          python -m pip install websockify
-          Write-Output "===== install-proxy END ====="
+          Write-Output "===== install-chinese-fonts START ====="
+          # 安装中文字体（微软雅黑、宋体、黑体、楷体）
+          $fontDir = "C:\Windows\Fonts"
+          $fonts = @(
+            @{Name="msyh.ttc"; Url="https://github.com/StellarCN/scp_zh/raw/master/fonts/msyh.ttc"},
+            @{Name="simsun.ttc"; Url="https://github.com/StellarCN/scp_zh/raw/master/fonts/simsun.ttc"}
+          )
+          foreach ($f in $fonts) {
+            $dest = "$fontDir\$($f.Name)"
+            if (-not (Test-Path $dest)) {
+              try {
+                Invoke-WebRequest -Uri $f.Url -OutFile $dest -UseBasicParsing -TimeoutSec 60
+                Write-Output "Installed: $($f.Name)"
+              } catch {
+                Write-Output "Failed to download $($f.Name): $_"
+              }
+            }
+          }
+          # 设置系统区域为中文
+          Set-WinSystemLocale -SystemLocale "zh-CN" -ErrorAction SilentlyContinue
+          Set-Culture "zh-CN" -ErrorAction SilentlyContinue
+          Write-Output "===== install-chinese-fonts END ====="
 
-      - name: 3. Download noVNC web
+      - name: 3. Install IIS & Prerequisites
         shell: powershell
         run: |
-          Write-Output "===== download-novnc START ====="
-          $workDir = (Get-Location).Path
-          $novncDir = "$workDir\novnc"
-          New-Item -ItemType Directory -Path $novncDir -Force | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$workDir\novnc.zip"
-          Expand-Archive -Path "$workDir\novnc.zip" -DestinationPath "$workDir" -Force
-          Copy-Item -Path "$workDir\noVNC-master\*" -Destination $novncDir -Recurse -Force
-          Write-Output "noVNC ready at $novncDir"
-          Write-Output "===== download-novnc END ====="
+          Write-Output "===== install-iis START ====="
+          Get-WindowsFeature -Name NET-*, Web-* | Where-Object { $_.Name -notmatch "Ftp" } | Install-WindowsFeature -ErrorAction SilentlyContinue
+          Set-Service -Name Spooler -StartupType Automatic -ErrorAction SilentlyContinue
+          Start-Service -Name Spooler -ErrorAction SilentlyContinue
+          Write-Output "===== install-iis END ====="
 
-      - name: 4. Register device
+      - name: 4. Install Myrtille
+        shell: powershell
+        run: |
+          Write-Output "===== install-myrtille START ====="
+          $msi = "$env:TEMP\Myrtille.msi"
+          $urls = @(
+            "https://github.com/myrtille-rdp/myrtille/releases/download/v2.9.2/Myrtille_2.9.2_x86_x64_Setup.msi",
+            "https://gh-proxy.org/https://github.com/myrtille-rdp/myrtille/releases/download/v2.9.2/Myrtille_2.9.2_x86_x64_Setup.msi"
+          )
+          $ok = $false
+          foreach ($u in $urls) {
+            for ($i = 1; $i -le 3; $i++) {
+              Write-Output "try: $u (attempt $i)"
+              curl.exe -L --retry 2 --retry-delay 5 -o $msi $u
+              if ((Test-Path $msi) -and ((Get-Item $msi).Length -gt 1MB)) { $ok = $true; break }
+              Start-Sleep -Seconds 5
+            }
+            if ($ok) { break }
+          }
+          if (-not $ok) { throw "myrtille download failed" }
+          Write-Output "downloaded: $((Get-Item $msi).Length) bytes"
+          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
+          Write-Output "===== install-myrtille END ====="
+
+      - name: 5. Register device
         shell: powershell
         run: |
           Write-Output "===== register-device START ====="
@@ -72,19 +109,6 @@ jobs:
           powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
           Write-Output "===== register-device END ====="
 
-      - name: 5. Start websockify with noVNC web
-        shell: powershell
-        run: |
-          Write-Output "===== start-proxy START ====="
-          $pythonPath = (Get-Command python).Source
-          $workDir = (Get-Location).Path
-          $novncDir = "$workDir\novnc"
-          # websockify: 6080 -> RDP 3389, 同时提供noVNC网页
-          Start-Process -FilePath $pythonPath -ArgumentList "-m websockify 6080 localhost:3389 --web $novncDir" -WorkingDirectory $workDir -WindowStyle Hidden
-          Start-Sleep -Seconds 8
-          netstat -ano | findstr "6080"
-          Write-Output "===== start-proxy END ====="
-
       - name: 6. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
@@ -94,7 +118,7 @@ jobs:
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
           $errLog = "$workDir\cf-err.log"
-          Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:6080 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -NoNewWindow
+          Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:80 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -NoNewWindow
           $url = ""
           for ($i = 0; $i -lt 24; $i++) {
             Start-Sleep -Seconds 5
@@ -113,8 +137,8 @@ jobs:
           if ($url) {
             $body = @{
               device_id = "$env:DEVICE_ID"
-              url = "$url"
-              password = "newera2625"
+              url = "$url/Myrtille"
+              password = "Newera@2625"
               os = "windows"
               instance = "${{ matrix.instance }}"
             } | ConvertTo-Json
