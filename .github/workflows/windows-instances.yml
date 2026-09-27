@@ -31,20 +31,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "create user failed" }
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install Chinese Language Pack
-        shell: powershell
-        run: |
-          Write-Output "===== install-chinese-lang START ====="
-          Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
-          Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
-          Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
-          Set-WinSystemLocale -SystemLocale "zh-CN"
-          Set-Culture "zh-CN"
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'InstallLanguage' -Value '0804' -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'Default' -Value '0804' -ErrorAction SilentlyContinue
-          Write-Output "===== install-chinese-lang END ====="
-
-      - name: 3. Install IIS & Prerequisites
+      - name: 2. Install IIS & Prerequisites
         shell: powershell
         run: |
           Write-Output "===== install-iis START ====="
@@ -53,7 +40,7 @@ jobs:
           Start-Service -Name Spooler -ErrorAction SilentlyContinue
           Write-Output "===== install-iis END ====="
 
-      - name: 4. Install Myrtille
+      - name: 3. Install Myrtille
         shell: powershell
         run: |
           Write-Output "===== install-myrtille START ====="
@@ -77,7 +64,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
           Write-Output "===== install-myrtille END ====="
 
-      - name: 5. Set Myrtille Chinese
+      - name: 4. Set Myrtille Chinese
         shell: powershell
         run: |
           Write-Output "===== set-myrtille-chinese START ====="
@@ -105,7 +92,7 @@ jobs:
           iisreset
           Write-Output "===== set-myrtille-chinese END ====="
 
-      - name: 5b. Set Myrtille Touch Mode
+      - name: 5. Set Myrtille Touch Mode
         shell: powershell
         run: |
           Write-Output "===== set-touch START ====="
