@@ -21,27 +21,12 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "SecurityLayer" -Value 0 -Type DWord
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "fAllowRemoteConnections" -Value 1 -Type DWord
-
           net user rdpuser "Newera@2625" /add
           net localgroup "Remote Desktop Users" rdpuser /add
           net localgroup "Administrators" rdpuser /add
-          if ($LASTEXITCODE -ne 0) { throw "create user failed" }
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install Chinese Language Pack
-        shell: powershell
-        run: |
-          Write-Output "===== install-chinese-lang START ====="
-          # Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue  # 太慢，跳过
-          # Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
-          # Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
-          Set-WinSystemLocale -SystemLocale "zh-CN"
-          Set-Culture "zh-CN"
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'InstallLanguage' -Value '0804' -ErrorAction SilentlyContinue
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'Default' -Value '0804' -ErrorAction SilentlyContinue
-          Write-Output "===== install-chinese-lang END ====="
-
-      - name: 3. Install IIS & Prerequisites
+      - name: 2. Install IIS & Prerequisites
         shell: powershell
         run: |
           Write-Output "===== install-iis START ====="
@@ -50,7 +35,7 @@ jobs:
           Start-Service -Name Spooler -ErrorAction SilentlyContinue
           Write-Output "===== install-iis END ====="
 
-      - name: 4. Install Myrtille
+      - name: 3. Install Myrtille
         shell: powershell
         run: |
           Write-Output "===== install-myrtille START ====="
@@ -62,23 +47,19 @@ jobs:
           $ok = $false
           foreach ($u in $urls) {
             for ($i = 1; $i -le 3; $i++) {
-              Write-Output "try: $u (attempt $i)"
               curl.exe -L --retry 2 --retry-delay 5 -o $msi $u
               if ((Test-Path $msi) -and ((Get-Item $msi).Length -gt 1MB)) { $ok = $true; break }
               Start-Sleep -Seconds 5
             }
             if ($ok) { break }
           }
-          if (-not $ok) { throw "myrtille download failed" }
-          Write-Output "downloaded: $((Get-Item $msi).Length) bytes"
           Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
           Write-Output "===== install-myrtille END ====="
 
-      - name: 5. Set Myrtille Chinese
+      - name: 4. Disable Bitmap Cache
         shell: powershell
         run: |
-          Write-Output "===== set-myrtille-chinese START ====="
-          # 找Myrtille的web.config
+          Write-Output "===== disable-cache START ====="
           $configPaths = @(
             "C:\Program Files\Myrtille\web.config",
             "C:\Program Files (x86)\Myrtille\web.config",
@@ -88,79 +69,19 @@ jobs:
             if (Test-Path $cfg) {
               Write-Output "Found: $cfg"
               $content = Get-Content $cfg -Raw
-              # 添加或替换globalization设置为中文
-              if ($content -match '<globalization') {
-                $content = $content -replace '<globalization[^>]*/>', '<globalization culture="zh-CN" uiCulture="zh-CN" />'
-              } else {
-                $content = $content -replace '<system.web>', "<system.web>`n    <globalization culture=`"zh-CN`" uiCulture=`"zh-CN`" />"
-              }
-              Set-Content $cfg $content -Encoding UTF8
-              Write-Output "Set Chinese in $cfg"
-            }
-          }
-          # 关闭持久位图缓存和RemoteFX（减少残影）
-          foreach ($cfg in $configPaths) {
-            if (Test-Path $cfg) {
-              $content = Get-Content $cfg -Raw
               $content = $content -replace 'BitmapCache" value="True"', 'BitmapCache" value="False"'
               $content = $content -replace 'RemoteFx" value="True"', 'RemoteFx" value="False"'
               Set-Content $cfg $content -Encoding UTF8
+              Write-Output "Disabled cache"
             }
           }
-          # 重启IIS
           iisreset
-          Write-Output "===== set-myrtille-chinese END ====="
+          Write-Output "===== disable-cache END ====="
 
-      - name: 5b. Set Myrtille Touch Mode
-        shell: powershell
-        run: |
-          Write-Output "===== set-touch START ====="
-          # 找Myrtille的config.js
-          $configFiles = @()
-          $configFiles += Get-ChildItem "C:\Program Files\Myrtille" -Recurse -Filter "config.js" -ErrorAction SilentlyContinue
-          $configFiles += Get-ChildItem "C:\Program Files (x86)\Myrtille" -Recurse -Filter "config.js" -ErrorAction SilentlyContinue
-          foreach ($cfg in $configFiles) {
-            Write-Output "Found: $($cfg.FullName)"
-            $content = Get-Content $cfg.FullName -Raw
-            # 启用触摸支持，设置为触摸板模式（相对移动）
-            if ($content -match 'touchMode') {
-              $content = $content -replace 'touchMode\s*:\s*\d+', 'touchMode: 1'
-            } else {
-              # 在配置对象里加touchMode
-              $content = $content -replace '=\s*\{', "={`n    touchMode: 1,", 1
-            }
-            Set-Content $cfg.FullName $content -Encoding UTF8
-            Write-Output "Set touchMode in $($cfg.FullName)"
-          }
-          iisreset
-          Write-Output "===== set-touch END ====="
-
-      - name: 6. Register device
-        shell: powershell
-        run: |
-          Write-Output "===== register-device START ====="
-          $dir = "C:\Program Files\server-status-client"
-          $cfgDir = "C:\ProgramData\server-status"
-          New-Item -ItemType Directory -Path $dir -Force | Out-Null
-          New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
-          Invoke-WebRequest -Uri "http://status.newera2625.top/download/client.ps1" -OutFile "$dir\client.ps1"
-          $deviceId = [guid]::NewGuid().ToString()
-          $config = @{
-            report_url = "http://status.newera2625.top/api/report"
-            device_id = $deviceId
-            is_main = $false
-          }
-          $config | ConvertTo-Json | Out-File -FilePath "$cfgDir\config.json" -Encoding utf8
-          Write-Output "DEVICE_ID=$deviceId"
-          echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
-          powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
-          Write-Output "===== register-device END ====="
-
-      - name: 7. Start Cloudflare Tunnel & report
+      - name: 5. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
           Write-Output "===== tunnel START ====="
-          $dir = "C:\Program Files\server-status-client"
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
           $workDir = (Get-Location).Path
           $outLog = "$workDir\cf-out.log"
@@ -183,7 +104,7 @@ jobs:
           Write-Output "TUNNEL_URL=$url"
           if ($url) {
             $body = @{
-              device_id = "$env:DEVICE_ID"
+              device_id = [guid]::NewGuid().ToString()
               url = "$url/Myrtille"
               password = "Newera@2625"
               os = "windows"
@@ -191,13 +112,12 @@ jobs:
             } | ConvertTo-Json
             try {
               $resp = Invoke-RestMethod -Uri "https://cloud.newera2625.top/api/report" -Method Post -Body $body -ContentType "application/json"
-              Write-Output "report response: $resp"
+              Write-Output "report: $resp"
             } catch { Write-Output "report failed: $_" }
           }
           Write-Output "===== KEEP ALIVE START ====="
           $loopDeadline = (Get-Date).AddHours(5)
           while ((Get-Date) -lt $loopDeadline) {
-            powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "$dir\client.ps1"
-            Start-Sleep -Seconds 30
+            Start-Sleep -Seconds 60
           }
           Write-Output "===== KEEP ALIVE END ====="
