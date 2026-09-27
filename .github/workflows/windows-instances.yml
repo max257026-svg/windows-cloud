@@ -102,6 +102,30 @@ jobs:
           iisreset
           Write-Output "===== set-myrtille-chinese END ====="
 
+      - name: 5b. Set Myrtille Touch Mode
+        shell: powershell
+        run: |
+          Write-Output "===== set-touch START ====="
+          # 找Myrtille的config.js
+          $configFiles = @()
+          $configFiles += Get-ChildItem "C:\Program Files\Myrtille" -Recurse -Filter "config.js" -ErrorAction SilentlyContinue
+          $configFiles += Get-ChildItem "C:\Program Files (x86)\Myrtille" -Recurse -Filter "config.js" -ErrorAction SilentlyContinue
+          foreach ($cfg in $configFiles) {
+            Write-Output "Found: $($cfg.FullName)"
+            $content = Get-Content $cfg.FullName -Raw
+            # 启用触摸支持，设置为触摸板模式（相对移动）
+            if ($content -match 'touchMode') {
+              $content = $content -replace 'touchMode\s*:\s*\d+', 'touchMode: 1'
+            } else {
+              # 在配置对象里加touchMode
+              $content = $content -replace '=\s*\{', "={`n    touchMode: 1,", 1
+            }
+            Set-Content $cfg.FullName $content -Encoding UTF8
+            Write-Output "Set touchMode in $($cfg.FullName)"
+          }
+          iisreset
+          Write-Output "===== set-touch END ====="
+
       - name: 6. Register device
         shell: powershell
         run: |
