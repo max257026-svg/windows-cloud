@@ -83,6 +83,9 @@ jobs:
               Set-Content $cfg $content -Encoding UTF8
             }
           }
+          # 关闭RDP持久位图缓存
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name 'DisableBitmapCaching' -Value 1 -Type DWord -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'BitmapCache' -Value 0 -Type DWord -ErrorAction SilentlyContinue
           iisreset
           Write-Output "===== disable-cache END ====="
 
