@@ -26,23 +26,17 @@ jobs:
           net localgroup "Remote Desktop Users" rdpuser /add
           net localgroup "Administrators" rdpuser /add
           if ($LASTEXITCODE -ne 0) { throw "create user failed" }
-
           Write-Output "===== enable-rdp END ====="
 
       - name: 2. Install Chinese Language Pack
         shell: powershell
         run: |
           Write-Output "===== install-chinese-lang START ====="
-          # 安装中文简体语言包
           Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
-          # 设置系统UI语言为中文
           Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
           Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
-          # 设置系统区域和位置
           Set-WinSystemLocale -SystemLocale "zh-CN"
           Set-Culture "zh-CN"
-          Set-WinHomeLocation -GeoId 45 -ErrorAction SilentlyContinue
-          # 设置注册表默认UI语言
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'InstallLanguage' -Value '0804' -ErrorAction SilentlyContinue
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'Default' -Value '0804' -ErrorAction SilentlyContinue
           Write-Output "===== install-chinese-lang END ====="
@@ -80,7 +74,35 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
           Write-Output "===== install-myrtille END ====="
 
-      - name: 5. Register device
+      - name: 5. Set Myrtille Chinese
+        shell: powershell
+        run: |
+          Write-Output "===== set-myrtille-chinese START ====="
+          # 找Myrtille的web.config
+          $configPaths = @(
+            "C:\Program Files\Myrtille\web.config",
+            "C:\Program Files (x86)\Myrtille\web.config",
+            "C:\inetpub\wwwroot\Myrtille\web.config"
+          )
+          foreach ($cfg in $configPaths) {
+            if (Test-Path $cfg) {
+              Write-Output "Found: $cfg"
+              $content = Get-Content $cfg -Raw
+              # 添加或替换globalization设置为中文
+              if ($content -match '<globalization') {
+                $content = $content -replace '<globalization[^>]*/>', '<globalization culture="zh-CN" uiCulture="zh-CN" />'
+              } else {
+                $content = $content -replace '<system.web>', "<system.web>`n    <globalization culture=`"zh-CN`" uiCulture=`"zh-CN`" />"
+              }
+              Set-Content $cfg $content -Encoding UTF8
+              Write-Output "Set Chinese in $cfg"
+            }
+          }
+          # 重启IIS
+          iisreset
+          Write-Output "===== set-myrtille-chinese END ====="
+
+      - name: 6. Register device
         shell: powershell
         run: |
           Write-Output "===== register-device START ====="
@@ -101,7 +123,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
           Write-Output "===== register-device END ====="
 
-      - name: 6. Start Cloudflare Tunnel & report
+      - name: 7. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
           Write-Output "===== tunnel START ====="
