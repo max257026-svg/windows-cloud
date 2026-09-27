@@ -32,9 +32,9 @@ jobs:
         shell: powershell
         run: |
           Write-Output "===== install-chinese-lang START ====="
-          Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
-          Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
-          Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
+          # Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue  # 太慢，跳过
+          # Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
+          # Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
           Set-WinSystemLocale -SystemLocale "zh-CN"
           Set-Culture "zh-CN"
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\Language' -Name 'InstallLanguage' -Value '0804' -ErrorAction SilentlyContinue
