@@ -28,7 +28,6 @@ jobs:
 
       - name: 2. Install Chinese Language
         shell: powershell
-        continueOnError: true
         run: |
           Write-Output "===== chinese-lang START ====="
           Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
