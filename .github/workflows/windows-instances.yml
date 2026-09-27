@@ -76,7 +76,27 @@ jobs:
           iisreset
           Write-Output "===== disable-cache END ====="
 
-      - name: 5. Start Cloudflare Tunnel & report
+      - name: 5. Register device
+        shell: powershell
+        run: |
+          Write-Output "===== register START ====="
+          $dir = "C:\Program Files\server-status-client"
+          $cfgDir = "C:\ProgramData\server-status"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+          Invoke-WebRequest -Uri "http://status.newera2625.top/download/client.ps1" -OutFile "$dir\client.ps1"
+          $deviceId = [guid]::NewGuid().ToString()
+          $config = @{
+            report_url = "http://status.newera2625.top/api/report"
+            device_id = $deviceId
+            is_main = $false
+          }
+          $config | ConvertTo-Json | Out-File -FilePath "$cfgDir\config.json" -Encoding utf8
+          echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
+          Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$dir\client.ps1`"" -WindowStyle Hidden
+          Write-Output "===== register END ====="
+
+      - name: 6. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
           Write-Output "===== tunnel START ====="
@@ -102,7 +122,7 @@ jobs:
           Write-Output "TUNNEL_URL=$url"
           if ($url) {
             $body = @{
-              device_id = [guid]::NewGuid().ToString()
+              device_id = "$env:DEVICE_ID"
               url = "$url/Myrtille"
               password = "Newera@2625"
               os = "windows"
