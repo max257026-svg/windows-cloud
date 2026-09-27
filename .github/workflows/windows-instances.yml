@@ -98,6 +98,15 @@ jobs:
               Write-Output "Set Chinese in $cfg"
             }
           }
+          # 关闭持久位图缓存和RemoteFX（减少残影）
+          foreach ($cfg in $configPaths) {
+            if (Test-Path $cfg) {
+              $content = Get-Content $cfg -Raw
+              $content = $content -replace 'BitmapCache" value="True"', 'BitmapCache" value="False"'
+              $content = $content -replace 'RemoteFx" value="True"', 'RemoteFx" value="False"'
+              Set-Content $cfg $content -Encoding UTF8
+            }
+          }
           # 重启IIS
           iisreset
           Write-Output "===== set-myrtille-chinese END ====="
