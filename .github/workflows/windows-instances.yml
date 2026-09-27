@@ -26,17 +26,7 @@ jobs:
           net localgroup "Administrators" rdpuser /add
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install Chinese Language
-        shell: powershell
-        run: |
-          Write-Output "===== chinese-lang START ====="
-          Install-Language zh-CN -CopyToSettings -ErrorAction SilentlyContinue
-          Set-WinUILanguageOverride -Language "zh-CN" -ErrorAction SilentlyContinue
-          Set-WinUserLanguageList "zh-CN" -Force -ErrorAction SilentlyContinue
-          Set-WinSystemLocale -SystemLocale "zh-CN"
-          Write-Output "===== chinese-lang END ====="
-
-      - name: 3. Install IIS & Prerequisites
+      - name: 2. Install IIS & Prerequisites
         shell: powershell
         run: |
           Write-Output "===== install-iis START ====="
@@ -45,7 +35,7 @@ jobs:
           Start-Service -Name Spooler -ErrorAction SilentlyContinue
           Write-Output "===== install-iis END ====="
 
-      - name: 4. Install Myrtille
+      - name: 3. Install Myrtille
         shell: powershell
         run: |
           Write-Output "===== install-myrtille START ====="
@@ -66,7 +56,7 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
           Write-Output "===== install-myrtille END ====="
 
-      - name: 5. Disable Bitmap Cache
+      - name: 4. Disable Bitmap Cache
         shell: powershell
         run: |
           Write-Output "===== disable-cache START ====="
@@ -86,7 +76,7 @@ jobs:
           iisreset
           Write-Output "===== disable-cache END ====="
 
-      - name: 6. Start Cloudflare Tunnel & report
+      - name: 5. Start Cloudflare Tunnel & report
         shell: powershell
         run: |
           Write-Output "===== tunnel START ====="
