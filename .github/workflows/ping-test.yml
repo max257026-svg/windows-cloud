@@ -1,0 +1,20 @@
+name: ping-test
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  ping:
+    runs-on: windows-latest
+    steps:
+      - name: Ping mc.yqst.top (10 packets)
+        run: ping mc.yqst.top -n 10
+      - name: TCP connect test port 25565
+        run: |
+          $t = New-Object System.Net.Sockets.TcpClient
+          try { $t.Connect('mc.yqst.top', 25565); Write-Host "TCP 25565: CONNECT OK" } catch { Write-Host "TCP 25565: FAIL $($_.Exception.Message)" }
+      - name: TCP connect test port 80
+        run: |
+          $t = New-Object System.Net.Sockets.TcpClient
+          try { $t.Connect('mc.yqst.top', 80); Write-Host "TCP 80: CONNECT OK" } catch { Write-Host "TCP 80: FAIL $($_.Exception.Message)" }
