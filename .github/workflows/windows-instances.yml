@@ -1,10 +1,10 @@
-name: Windows Web RDP
+name: Windows Cloud RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  myrtille-rdp:
+  windows-rdp:
     runs-on: windows-latest
     timeout-minutes: 360
     strategy:
@@ -19,9 +19,9 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "SecurityLayer" -Value 0 -Type DWord
+          # 1 = SSL/TLS，IronRDP 不接受 STANDARD_RDP_SECURITY（0）
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "SecurityLayer" -Value 1 -Type DWord
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "fAllowRemoteConnections" -Value 1 -Type DWord
-          # 关闭持久位图缓存（解决残影问题）
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "BitmapCacheEnabled" -Value 0 -Type DWord
           Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "BitmapCachePersistent" -Value 0 -Type DWord
 
@@ -31,68 +31,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "create user failed" }
           Write-Output "===== enable-rdp END ====="
 
-      - name: 2. Install IIS & Prerequisites
-        shell: powershell
-        run: |
-          Write-Output "===== install-iis START ====="
-          Get-WindowsFeature -Name NET-*, Web-* | Where-Object { $_.Name -notmatch "Ftp" } | Install-WindowsFeature -ErrorAction SilentlyContinue
-          Set-Service -Name Spooler -StartupType Automatic -ErrorAction SilentlyContinue
-          Start-Service -Name Spooler -ErrorAction SilentlyContinue
-          Write-Output "===== install-iis END ====="
-
-      - name: 3. Install Myrtille
-        shell: powershell
-        run: |
-          Write-Output "===== install-myrtille START ====="
-          $msi = "$env:TEMP\Myrtille.msi"
-          $urls = @(
-            "https://github.com/myrtille-rdp/myrtille/releases/download/v2.9.2/Myrtille_2.9.2_x86_x64_Setup.msi",
-            "https://gh-proxy.org/https://github.com/myrtille-rdp/myrtille/releases/download/v2.9.2/Myrtille_2.9.2_x86_x64_Setup.msi"
-          )
-          $ok = $false
-          foreach ($u in $urls) {
-            for ($i = 1; $i -le 3; $i++) {
-              Write-Output "try: $u (attempt $i)"
-              curl.exe -L --retry 2 --retry-delay 5 -o $msi $u
-              if ((Test-Path $msi) -and ((Get-Item $msi).Length -gt 1MB)) { $ok = $true; break }
-              Start-Sleep -Seconds 5
-            }
-            if ($ok) { break }
-          }
-          if (-not $ok) { throw "myrtille download failed" }
-          Write-Output "downloaded: $((Get-Item $msi).Length) bytes"
-          Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait
-          Write-Output "===== install-myrtille END ====="
-
-      - name: 4. Set Myrtille Chinese
-        shell: powershell
-        run: |
-          Write-Output "===== set-myrtille-chinese START ====="
-          # 找Myrtille的web.config
-          $configPaths = @(
-            "C:\Program Files\Myrtille\web.config",
-            "C:\Program Files (x86)\Myrtille\web.config",
-            "C:\inetpub\wwwroot\Myrtille\web.config"
-          )
-          foreach ($cfg in $configPaths) {
-            if (Test-Path $cfg) {
-              Write-Output "Found: $cfg"
-              $content = Get-Content $cfg -Raw
-              # 添加或替换globalization设置为中文
-              if ($content -match '<globalization') {
-                $content = $content -replace '<globalization[^>]*/>', '<globalization culture="zh-CN" uiCulture="zh-CN" />'
-              } else {
-                $content = $content -replace '<system.web>', "<system.web>`n    <globalization culture=`"zh-CN`" uiCulture=`"zh-CN`" />"
-              }
-              Set-Content $cfg $content -Encoding UTF8
-              Write-Output "Set Chinese in $cfg"
-            }
-          }
-          # 重启IIS
-          iisreset
-          Write-Output "===== set-myrtille-chinese END ====="
-
-      - name: 5. Register device
+      - name: 2. Register device
         shell: powershell
         run: |
           Write-Output "===== register-device START ====="
@@ -113,48 +52,81 @@ jobs:
           powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
           Write-Output "===== register-device END ====="
 
-      - name: 6. Start Cloudflare Tunnel & report
+      - name: 3. Start RDP proxy + SSH tunnel + keepalive
         shell: powershell
+        env:
+          TUNNEL_SSH_KEY: ${{ secrets.TUNNEL_SSH_KEY }}
         run: |
-          Write-Output "===== tunnel START ====="
-          $dir = "C:\Program Files\server-status-client"
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
-          $workDir = (Get-Location).Path
-          $outLog = "$workDir\cf-out.log"
-          $errLog = "$workDir\cf-err.log"
-          Start-Process -FilePath "$workDir\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:80 --no-autoupdate" -RedirectStandardOutput $outLog -RedirectStandardError $errLog -NoNewWindow
-          $url = ""
-          for ($i = 0; $i -lt 24; $i++) {
-            Start-Sleep -Seconds 5
-            foreach ($lf in @($outLog, $errLog)) {
-              if ((Test-Path $lf) -and ((Get-Item $lf).Length -gt 0)) {
-                $logText = Get-Content $lf -Raw -ErrorAction SilentlyContinue
-                if ($logText) {
-                  $m = [regex]::Match($logText, 'https://[a-z0-9-]+\.trycloudflare\.com')
-                  if ($m.Success) { $url = $m.Value; break }
+          $ErrorActionPreference = "Stop"
+          Write-Output "===== start-rdp-proxy START ====="
+          if (-not $env:DEVICE_ID) { throw "DEVICE_ID is empty" }
+
+          $dir = "C:\Program Files\cloud-pc"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          Invoke-WebRequest -Uri "https://cloud.newera2625.top/static/client/rdp_proxy.py" -OutFile "$dir\rdp_proxy.py"
+          python -m pip install --quiet websockets
+
+          $key = "$env:USERPROFILE\.ssh\tunnel_key"
+          New-Item -ItemType Directory -Path (Split-Path $key) -Force | Out-Null
+          [IO.File]::WriteAllText($key, $env:TUNNEL_SSH_KEY)
+          icacls $key /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
+
+          $port = 23000 + [int]"${{ matrix.instance }}"
+          $sshArgs = @(
+            "-i", $key,
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=NUL",
+            "-o", "LogLevel=ERROR",
+            "-o", "ExitOnForwardFailure=yes",
+            "-o", "ServerAliveInterval=30",
+            "-o", "ServerAliveCountMax=3",
+            "-N",
+            "-R", "127.0.0.1:${port}:127.0.0.1:6082",
+            "tunnel@207.57.134.183",
+            "-p", "46318"
+          )
+
+          $proxyPid = $null
+          $sshPid = $null
+          $deadline = (Get-Date).AddSeconds(18000)
+          $reported = $false
+          $lastReport = Get-Date
+
+          while ((Get-Date) -lt $deadline) {
+            if (-not $proxyPid -or -not (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue)) {
+              $p = Start-Process -FilePath "python" -ArgumentList @("$dir\rdp_proxy.py", "--port", "6082") -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir\proxy-out.log" -RedirectStandardError "$dir\proxy-err.log"
+              $proxyPid = $p.Id
+              Start-Sleep -Seconds 2
+            }
+
+            if (-not $sshPid -or -not (Get-Process -Id $sshPid -ErrorAction SilentlyContinue)) {
+              $s = Start-Process -FilePath "ssh.exe" -ArgumentList $sshArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir\ssh-out.log" -RedirectStandardError "$dir\ssh-err.log"
+              $sshPid = $s.Id
+              Start-Sleep -Seconds 8
+            }
+
+            if ($sshPid -and (Get-Process -Id $sshPid -ErrorAction SilentlyContinue)) {
+              if ((-not $reported) -or ((Get-Date) - $lastReport).TotalSeconds -ge 30) {
+                $body = @{
+                  device_id = "$env:DEVICE_ID"
+                  url = "wss://wss.newera2625.top/relay/win/${{ matrix.instance }}"
+                  password = "Newera@2625"
+                  os = "windows"
+                  instance = "${{ matrix.instance }}"
+                } | ConvertTo-Json
+                try {
+                  Invoke-RestMethod -Uri "https://cloud.newera2625.top/api/report" -Method Post -Body $body -ContentType "application/json" | Out-Null
+                  $reported = $true
+                  $lastReport = Get-Date
+                  Write-Output "reported instance ${{ matrix.instance }}"
+                } catch {
+                  Write-Output "report failed: $_"
                 }
               }
             }
-            if ($url) { break }
+            Start-Sleep -Seconds 20
           }
-          Write-Output "TUNNEL_URL=$url"
-          if ($url) {
-            $body = @{
-              device_id = "$env:DEVICE_ID"
-              url = "$url/Myrtille"
-              password = "Newera@2625"
-              os = "windows"
-              instance = "${{ matrix.instance }}"
-            } | ConvertTo-Json
-            try {
-              $resp = Invoke-RestMethod -Uri "https://cloud.newera2625.top/api/report" -Method Post -Body $body -ContentType "application/json"
-              Write-Output "report response: $resp"
-            } catch { Write-Output "report failed: $_" }
-          }
-          Write-Output "===== KEEP ALIVE START ====="
-          $loopDeadline = (Get-Date).AddHours(5)
-          while ((Get-Date) -lt $loopDeadline) {
-            powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File "$dir\client.ps1"
-            Start-Sleep -Seconds 30
-          }
-          Write-Output "===== KEEP ALIVE END ====="
+
+          if ($sshPid) { Stop-Process -Id $sshPid -Force -ErrorAction SilentlyContinue }
+          if ($proxyPid) { Stop-Process -Id $proxyPid -Force -ErrorAction SilentlyContinue }
+          Write-Output "===== start-rdp-proxy END ====="
