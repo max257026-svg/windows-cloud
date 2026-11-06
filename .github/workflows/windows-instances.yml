@@ -61,10 +61,11 @@ jobs:
           Write-Output "===== start-rdp-proxy START ====="
           if (-not $env:DEVICE_ID) { throw "DEVICE_ID is empty" }
 
-          $dir = "C:\Program Files\cloud-pc"
+          $dir = "C:\cloud-pc"
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
           Invoke-WebRequest -Uri "https://cloud.newera2625.top/static/client/rdp_proxy.py" -OutFile "$dir\rdp_proxy.py"
-          python -m pip install --quiet websockets
+          python -m pip install --quiet --upgrade websockets
+          python -c "import websockets; print('websockets', websockets.__version__)"
 
           $key = "$env:USERPROFILE\.ssh\tunnel_key"
           New-Item -ItemType Directory -Path (Split-Path $key) -Force | Out-Null
@@ -94,7 +95,7 @@ jobs:
 
           while ((Get-Date) -lt $deadline) {
             if (-not $proxyPid -or -not (Get-Process -Id $proxyPid -ErrorAction SilentlyContinue)) {
-              $p = Start-Process -FilePath "python" -ArgumentList @("$dir\rdp_proxy.py", "--port", "6082") -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir\proxy-out.log" -RedirectStandardError "$dir\proxy-err.log"
+              $p = Start-Process -FilePath "python" -ArgumentList @("-u", "$dir\rdp_proxy.py", "--port", "6082") -PassThru -WindowStyle Hidden -RedirectStandardOutput "$dir\proxy-out.log" -RedirectStandardError "$dir\proxy-err.log"
               $proxyPid = $p.Id
               Start-Sleep -Seconds 2
             }
@@ -105,7 +106,17 @@ jobs:
               Start-Sleep -Seconds 8
             }
 
-            if ($sshPid -and (Get-Process -Id $sshPid -ErrorAction SilentlyContinue)) {
+            $proxyListening = $false
+            try {
+              $proxyListening = [bool](Get-NetTCPConnection -LocalPort 6082 -State Listen -ErrorAction SilentlyContinue)
+            } catch {}
+
+            if (-not $proxyListening) {
+              Write-Output "proxy not listening on 6082"
+              if (Test-Path "$dir\proxy-err.log") { Get-Content "$dir\proxy-err.log" -Tail 8 | Write-Output }
+            }
+
+            if ($proxyListening -and $sshPid -and (Get-Process -Id $sshPid -ErrorAction SilentlyContinue)) {
               if ((-not $reported) -or ((Get-Date) - $lastReport).TotalSeconds -ge 30) {
                 $body = @{
                   device_id = "$env:DEVICE_ID"
