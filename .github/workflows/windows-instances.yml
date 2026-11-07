@@ -34,24 +34,48 @@ jobs:
       - name: 2. Register device
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           Write-Output "===== register-device START ====="
           $dir = "C:\Program Files\server-status-client"
           $cfgDir = "C:\ProgramData\server-status"
           New-Item -ItemType Directory -Path $dir -Force | Out-Null
           New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
-          Invoke-WebRequest -Uri "http://status.newera2625.top/download/client.ps1" -OutFile "$dir\client.ps1"
+          Invoke-WebRequest -Uri "https://status.newera2625.top/download/client.ps1" -OutFile "$dir\client.ps1"
           $deviceId = [guid]::NewGuid().ToString()
           $config = @{
-            report_url = "http://status.newera2625.top/api/report"
+            report_url = "https://status.newera2625.top/api/report"
             device_id = $deviceId
             is_main = $false
           }
           $config | ConvertTo-Json | Out-File -FilePath "$cfgDir\config.json" -Encoding utf8
           Write-Output "DEVICE_ID=$deviceId"
           echo "DEVICE_ID=$deviceId" >> $env:GITHUB_ENV
-          powershell -ExecutionPolicy Bypass -File "$dir\client.ps1"
-          Write-Output "===== register-device END ====="
 
+          $runScript = "$dir\run.ps1"
+          $runContent = @"
+          while (`$true) {
+              try {
+                  Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$dir\client.ps1`"" -Wait -WindowStyle Hidden
+              } catch {}
+              Start-Sleep -Seconds 30
+          }
+          "@
+          $runContent | Out-File -FilePath $runScript -Encoding utf8
+
+          $taskName = "ServerStatusClient"
+          Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+          $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runScript`""
+          $trigger = New-ScheduledTaskTrigger -AtStartup
+          $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+          $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+          Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+          Start-ScheduledTask -TaskName $taskName
+          Start-Sleep -Seconds 6
+          $state = (Get-ScheduledTask -TaskName $taskName).State
+          Write-Output "status task state: $state"
+          if ($state -ne 'Running') { throw "status task is not running" }
+          if (Test-Path "$cfgDir\client.log") { Get-Content "$cfgDir\client.log" -Tail 3 }
+          Write-Output "===== register-device END ====="
       - name: 3. Start RDP proxy + SSH tunnel + keepalive
         shell: powershell
         env:
